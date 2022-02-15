@@ -42,7 +42,6 @@ def reco_sentence_collate(examples: List[torch.Tensor], tokenizer):
     for i in examples:
         sections_ids.extend(i[0])
         sections_masks.extend(i[1])
-    print('helper')
     return (
         pad_sequence(sections_ids, padding_value=tokenizer.pad_token_id),
         pad_sequence(sections_masks, padding_value=tokenizer.pad_token_id),
