@@ -14,26 +14,20 @@ def get_gt_seeds_titles(titles=None, dataset_name="wines"):
 
 
 def reco_sentence_test_collate(examples: List[torch.Tensor], tokenizer):
-    examples_ = []
-    for example in examples:
-        sections = []
-        for section in example:
-            if section == []:
-                continue
-            sections.append(
-                (
-                    pad_sequence([i[0] for i in section], batch_first=True, padding_value=tokenizer.pad_token_id),
-                    [i[2] for i in section],
-                    [i[3] for i in section],
-                    [i[4] for i in section],
-                    [i[5] for i in section],
-                    [i[6] for i in section],
-                    [i[7] for i in section],
-                    torch.tensor([i[8] for i in section]),
-                )
-            )
-        examples_.append(sections)
-    return examples_
+    sections_ids = []
+    sections_masks = []
+    for i in examples:
+        sections_ids.extend(i[0])
+        sections_masks.extend(i[1])
+    return (
+        pad_sequence(sections_ids, padding_value=tokenizer.pad_token_id),
+        pad_sequence(sections_masks, padding_value=tokenizer.pad_token_id),
+        [i[2] for i in examples],
+        [i[3] for i in examples],
+        [i[4] for i in examples],
+        [i[5] for i in examples],
+        torch.tensor([i[6] for i in examples])
+    )
 
 
 def reco_sentence_collate(examples: List[torch.Tensor], tokenizer):

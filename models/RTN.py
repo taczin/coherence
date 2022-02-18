@@ -12,10 +12,12 @@ from datetime import datetime
 import os
 from models.SDR_utils import MPerClassSamplerDeter
 from pytorch_metric_learning.samplers import MPerClassSampler
-from data.data_utils import reco_sentence_collate
+from data.data_utils import reco_sentence_collate, reco_sentence_test_collate
 from functools import partial
 from pytorch_metric_learning import miners, losses, reducers
 from pytorch_metric_learning.distances import CosineSimilarity
+import pickle as pkl
+import faiss
 
 class RTN(LightningModule):
     def __init__(self, hparams):
@@ -69,7 +71,7 @@ class RTN(LightningModule):
         miner_output = list(self.miner_func(meaned_sentences, sample_labels))
         loss = self.loss_func(meaned_sentences, sample_labels, miner_output)
         #out = self.classifier(out)
-        return loss
+        return loss, meaned_sentences, batch[2]
 
 
     def configure_optimizers(self):
@@ -77,17 +79,42 @@ class RTN(LightningModule):
         return optimizer
 
     def training_step(self, train_batch, batch_idx):
-        loss = self(train_batch)
+        loss, _, _ = self(train_batch)
         return loss
 
     def validation_step(self, val_batch, batch_idx):
-        val_loss = self(val_batch)
+        val_loss, _, _ = self(val_batch)
         self.tracks['loss'] = val_loss.detach()
         return val_loss
 
 
     def test_step(self, test_batch, batch_idx):
-        raise NotImplementedError()
+        test_loss, outputs, titles = self(test_batch)
+        return test_loss, outputs, titles
+
+    def test_epoch_end(self, outputs):
+        gt_path = "./data/datasets/{}/gt".format(self.hparams.dataset_name)
+        gt = pkl.load(open(gt_path, "rb"))
+        doc_embeddings = []
+        doc_titles = []
+        for i in outputs:
+            doc_embeddings.append(i[1])
+            doc_titles.extend(i[2])
+        doc_embeddings = torch.cat(doc_embeddings, dim=0)
+        index = faiss.IndexFlatL2(len(doc_embeddings[0]))  # build the index
+        print(index.is_trained)
+        index.add(doc_embeddings)  # add vectors to the index
+        print(index.ntotal)
+        gt_article_embeds = []
+        not_found_counter = 0
+        for article in gt:
+            if article in doc_titles:
+                idx = doc_titles.index(article)
+                gt_article_embeds.append(doc_embeddings[idx])
+            else:
+                not_found_counter += 1
+        print('Did not find {} of {} articles in gt.'.format(not_found_counter, len(gt)))
+
 
 
 class SDRDataset(LightningDataModule):

@@ -233,25 +233,24 @@ class WikipediaTextDatasetParagraphsSentencesTest(WikipediaTextDatasetParagraphs
         return len(self.examples)
 
     def __getitem__(self, item):
-        sections = []
-        for idx_section, section in enumerate(self.examples[item][0]):
-            sentences = []
-            for idx_sentence, sentence in enumerate(section[0]):
-                sentences.append(
-                    (
-                        torch.tensor(self.tokenizer.build_inputs_with_special_tokens(sentence[0]), dtype=torch.long,),
-                        self.examples[item][1],
-                        section[1],
-                        sentence[1],
-                        item,
-                        idx_section,
-                        idx_sentence,
-                        item,
-                        self.labels[item],
-                    )
-                )
-            sections.append(sentences)
-        return sections
+        doc = [i[0][
+               : self.hparams.max_input_len
+               ] for i in self.examples[item][0]]
+        doc_masks = [i[1][
+                     : self.hparams.max_input_len
+                     ] for i in self.examples[item][0]]
+        sec_titles = [i[3] for i in self.examples[item][0]]
+        len_sections = [i[2] for i in self.examples[item][0]]
+
+        return (
+            doc,
+            doc_masks,
+            self.examples[item][1],
+            sec_titles,
+            len_sections,
+            item,
+            self.labels[item],
+        )
 
 
 class WikipediaTextDatasetOnePlusNCoherence(Dataset):
