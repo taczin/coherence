@@ -93,6 +93,7 @@ class RTN(LightningModule):
         return test_loss, outputs, titles
 
     def test_epoch_end(self, outputs):
+        res = faiss.StandardGpuResources()
         gt_path = "./data/datasets/{}/gt".format(self.hparams.dataset_name)
         gt = pkl.load(open(gt_path, "rb"))
         doc_embeddings = []
@@ -102,6 +103,7 @@ class RTN(LightningModule):
             doc_titles.extend(i[2])
         doc_embeddings = torch.cat(doc_embeddings, dim=0)
         index = faiss.IndexFlatL2(len(doc_embeddings[0]))  # build the index
+        index = faiss.index_cpu_to_gpu(res, 0, index)
         print(index.is_trained)
         index.add(doc_embeddings)  # add vectors to the index
         print(index.ntotal)
