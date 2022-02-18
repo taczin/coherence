@@ -43,7 +43,6 @@ def main_train(hparams,parser):
     print(f"\nLog directory:\n{model.hparams.hparams_dir}\n")
 
     trainer = pytorch_lightning.Trainer(
-        fast_dev_run=4,
         num_sanity_val_steps=2,
         gradient_clip_val=hparams.max_grad_norm,
         #callbacks=[RunValidationOnStart()],
@@ -58,7 +57,7 @@ def main_train(hparams,parser):
         # ),
         logger=logger,
         max_epochs=hparams.max_epochs,
-        gpus=0, #hparams.gpus,
+        gpus=hparams.gpus,
         #strategy="ddp",
         limit_val_batches=hparams.limit_val_batches,
         limit_train_batches=hparams.limit_train_batches,
