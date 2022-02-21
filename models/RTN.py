@@ -94,6 +94,10 @@ class RTN(LightningModule):
         return outputs, titles
 
     def test_epoch_end(self, outputs):
+        if not os.path.isfile("test_embeds_dev_run.pkl"):
+            pkl.dump(outputs, open("test_embeds_dev_run.pkl", 'wb'))
+        else:
+            outputs = pkl.load(open("test_embeds_dev_run.pkl", "rb"))
         res = faiss.StandardGpuResources()
         gt_path = "./data/datasets/{}/gt".format(self.hparams.dataset_name)
         gt = pkl.load(open(gt_path, "rb"))
