@@ -18,6 +18,7 @@ from pytorch_metric_learning import miners, losses, reducers
 from pytorch_metric_learning.distances import CosineSimilarity
 import pickle as pkl
 import faiss
+from models.eval_metrics import *
 
 class RTN(LightningModule):
     def __init__(self, hparams):
@@ -90,7 +91,7 @@ class RTN(LightningModule):
 
     def test_step(self, test_batch, batch_idx):
         test_loss, outputs, titles = self(test_batch)
-        return test_loss, outputs, titles
+        return outputs, titles
 
     def test_epoch_end(self, outputs):
         res = faiss.StandardGpuResources()
@@ -98,9 +99,11 @@ class RTN(LightningModule):
         gt = pkl.load(open(gt_path, "rb"))
         doc_embeddings = []
         doc_titles = []
+        article2idx = {}
         for i in outputs:
-            doc_embeddings.append(i[1])
-            doc_titles.extend(i[2])
+            doc_embeddings.append(i[0])
+            doc_titles.extend(i[1])
+            article2idx[i[1]] = i
         doc_embeddings = torch.cat(doc_embeddings, dim=0)
         index = faiss.IndexFlatL2(len(doc_embeddings[0]))  # build the index
         index = faiss.index_cpu_to_gpu(res, 0, index)
@@ -109,13 +112,23 @@ class RTN(LightningModule):
         print(index.ntotal)
         gt_article_embeds = []
         not_found_counter = 0
+        gt_as_ids = {}
         for article in gt:
             if article in doc_titles:
                 idx = doc_titles.index(article)
                 gt_article_embeds.append(doc_embeddings[idx])
+                #gt_as_ids[article] = torch.tensor([doc_titles.index(sim_art) for sim_art in gt[article]])
             else:
                 not_found_counter += 1
         print('Did not find {} of {} articles in gt.'.format(not_found_counter, len(gt)))
+        gt_article_embeds = torch.cat(gt_article_embeds, dim=0)
+        D, I = index.search(gt_article_embeds, len(doc_embeddings))
+        recos = []
+        for i, article in enumerate(gt):
+            recos.append((article2idx[article], I[i]))
+        output_path = 'test'
+        evaluate_wiki_recos(recos, output_path, gt_path, outputs)
+
 
 
 
