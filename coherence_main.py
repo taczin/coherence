@@ -58,7 +58,7 @@ def main_train(hparams,parser):
         # ),
         logger=logger,
         max_epochs=hparams.max_epochs,
-        gpus=0, #hparams.gpus,
+        gpus=hparams.gpus,
         #strategy="ddp",
         limit_val_batches=hparams.limit_val_batches,
         limit_train_batches=hparams.limit_train_batches,

@@ -117,7 +117,7 @@ class RTN(LightningModule):
         outputs = flattened_outputs
         doc_embeddings = torch.cat(doc_embeddings, dim=0)
         index = faiss.IndexFlatL2(len(doc_embeddings[0]))  # build the index
-        #index = faiss.index_cpu_to_gpu(res, 0, index)
+        index = faiss.index_cpu_to_gpu(res, 0, index)
         print(index.is_trained)
         index.add(doc_embeddings)  # add vectors to the index
         print(index.ntotal)
