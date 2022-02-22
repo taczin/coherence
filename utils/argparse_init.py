@@ -145,7 +145,7 @@ def init_parse_argparse_default_params(parser, dataset_name=None, arch=None):
         "--metric_to_track", default=None, help="which parameter to track on saving",
     )
     parser.add_argument("--val_batch_size", default=8, type=int)
-    parser.add_argument("--test_batch_size", default=8, type=int)
+    parser.add_argument("--test_batch_size", default=1, type=int)
     parser.add_argument("--test_only", type=str2bool, nargs="?", const=True, default=False)
     parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
 

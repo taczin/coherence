@@ -104,13 +104,20 @@ class RTN(LightningModule):
         doc_embeddings = []
         doc_titles = []
         article2idx = {}
-        for i in outputs:
-            doc_embeddings.append(i[0])
-            doc_titles.extend(i[1])
-            article2idx[i[1]] = i
+        article2embedding = {}
+        flattened_outputs = []
+        for i, tup in enumerate(outputs):
+            doc_embeddings.append(tup[0].to(self.device))
+            doc_titles.extend(tup[1])
+            flattened_outputs.extend(list(zip(tup[0], tup[1])))
+            for j, title in enumerate(tup[1]):
+                article2idx[title] = i*len(tup[1])+j
+                #article2embedding[title] = tup[0][j]
+
+        outputs = flattened_outputs
         doc_embeddings = torch.cat(doc_embeddings, dim=0)
         index = faiss.IndexFlatL2(len(doc_embeddings[0]))  # build the index
-        index = faiss.index_cpu_to_gpu(res, 0, index)
+        #index = faiss.index_cpu_to_gpu(res, 0, index)
         print(index.is_trained)
         index.add(doc_embeddings)  # add vectors to the index
         print(index.ntotal)
@@ -118,18 +125,26 @@ class RTN(LightningModule):
         not_found_counter = 0
         gt_as_ids = {}
         for article in gt:
-            if article in doc_titles:
-                idx = doc_titles.index(article)
+            lookup = article.replace("&",
+                                      "&amp;") if "amp;" not in article and article not in doc_titles else article
+            if lookup in doc_titles:
+                idx = doc_titles.index(lookup)
                 gt_article_embeds.append(doc_embeddings[idx])
                 #gt_as_ids[article] = torch.tensor([doc_titles.index(sim_art) for sim_art in gt[article]])
             else:
+                print(lookup)
                 not_found_counter += 1
         print('Did not find {} of {} articles in gt.'.format(not_found_counter, len(gt)))
-        gt_article_embeds = torch.cat(gt_article_embeds, dim=0)
+        gt_article_embeds = torch.stack(gt_article_embeds, dim=0)
         D, I = index.search(gt_article_embeds, len(doc_embeddings))
         recos = []
         for i, article in enumerate(gt):
-            recos.append((article2idx[article], I[i]))
+            lookup = article.replace("&",
+                                     "&amp;") if "amp;" not in article and article not in doc_titles else article
+            if lookup in doc_titles:
+                recos.append((article2idx[lookup], I[i]))
+            else:
+                continue
         output_path = 'test'
         evaluate_wiki_recos(recos, output_path, gt_path, outputs)
 
