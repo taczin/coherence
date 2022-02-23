@@ -20,9 +20,9 @@ import pickle as pkl
 import faiss
 from models.eval_metrics import *
 
-class RTN(LightningModule):
+class NextParagraphPrediction(LightningModule):
     def __init__(self, hparams):
-        super(RTN, self).__init__()
+        super(NextParagraphPrediction, self).__init__()
         self.hparams.update(vars(hparams))
         path = hparams.default_root_dir + hparams.dataset_name
         dt_string = datetime.now().strftime("%d_%m_%Y-%H_%M_%S")
@@ -117,7 +117,7 @@ class RTN(LightningModule):
         outputs = flattened_outputs
         doc_embeddings = torch.cat(doc_embeddings, dim=0)
         index = faiss.IndexFlatL2(len(doc_embeddings[0]))  # build the index
-        #index = faiss.index_cpu_to_gpu(res, 0, index)
+        index = faiss.index_cpu_to_gpu(res, 0, index)
         print(index.is_trained)
         index.add(doc_embeddings)  # add vectors to the index
         print(index.ntotal)
