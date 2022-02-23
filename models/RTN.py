@@ -94,6 +94,7 @@ class RTN(LightningModule):
         return outputs, titles
 
     def test_epoch_end(self, outputs):
+        device = 'cpu'
         if not os.path.isfile("test_embeds_dev_run.pkl"):
             pkl.dump(outputs, open("test_embeds_dev_run.pkl", 'wb'))
         else:
@@ -107,7 +108,7 @@ class RTN(LightningModule):
         article2embedding = {}
         flattened_outputs = []
         for i, tup in enumerate(outputs):
-            doc_embeddings.append(tup[0].to(self.device))
+            doc_embeddings.append(tup[0].to(device))
             doc_titles.extend(tup[1])
             flattened_outputs.extend(list(zip(tup[0], tup[1])))
             for j, title in enumerate(tup[1]):
