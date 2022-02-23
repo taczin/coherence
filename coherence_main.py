@@ -43,7 +43,7 @@ def main_train(hparams,parser):
     print(f"\nLog directory:\n{model.hparams.hparams_dir}\n")
 
     trainer = pytorch_lightning.Trainer(
-        fast_dev_run=4,
+        #fast_dev_run=4,
         num_sanity_val_steps=2,
         gradient_clip_val=hparams.max_grad_norm,
         #callbacks=[RunValidationOnStart()],
