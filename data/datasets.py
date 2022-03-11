@@ -454,7 +454,7 @@ class WikipediaTextDatasetParagraphOrder(Dataset):
         max_article_len,max_sentences, max_sent_len = int(1e6), 16, 10000
         block_size = min(block_size, tokenizer.max_len_sentences_pair) if tokenizer is not None else block_size
         self.block_size = block_size
-        self.tokenizer = SentenceTransformer('all-MiniLM-L6-v2', device=self.device)
+        self.tokenizer = SentenceTransformer('all-MiniLM-L6-v2')
 
         if os.path.exists(cached_features_file) and (self.hparams is None or not self.hparams.overwrite_data_cache):
             print("\nLoading features from cached file %s", cached_features_file)
