@@ -458,7 +458,7 @@ class WikipediaTextDatasetParagraphOrder(Dataset):
 
         if os.path.exists(cached_features_file) and (self.hparams is None or not self.hparams.overwrite_data_cache):
             print("\nLoading features from cached file %s", cached_features_file)
-            if os.path.getsize(target) > 0:
+            if os.path.getsize(cached_features_file) > 0:
                 with open(cached_features_file, "rb") as handle:
                     self.examples, self.labels = pickle.load(handle)
             else:
