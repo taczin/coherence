@@ -473,6 +473,8 @@ class WikipediaTextDatasetParagraphOrder(Dataset):
             self.labels = []
 
             for idx_article, article in enumerate(tqdm(all_articles)):
+                if idx_article > 100:
+                    break
                 this_sample_sections = []
                 title, sections = article[0], ast.literal_eval(article[1])
                 valid_sections_count = 0
