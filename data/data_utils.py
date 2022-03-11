@@ -26,7 +26,8 @@ def reco_sentence_test_collate(examples: List[torch.Tensor], tokenizer):
         [i[3] for i in examples],
         [i[4] for i in examples],
         [i[5] for i in examples],
-        torch.tensor([i[6] for i in examples])
+        torch.tensor([i[6] for i in examples]),
+        [i[7] for i in examples]
     )
 
 
@@ -99,6 +100,29 @@ def coherence_sentence_test_collate(examples: List[torch.Tensor], tokenizer):
             sections.append(tuple(first_sent))
         examples_.append(sections)
     return examples_
+
+def NPP_sentence_collate(examples: List[torch.Tensor]):
+    first_sent = [
+        pad_sequence([i[0][0] for i in examples], batch_first=True, padding_value=tokenizer.pad_token_id),
+        [i[0][2] for i in examples],
+        [i[0][3] for i in examples],
+        [i[0][4] for i in examples],
+        [i[0][5] for i in examples],
+        [i[0][6] for i in examples],
+        [i[0][7] for i in examples],
+        torch.tensor([i[0][8] for i in examples]),
+    ]
+    for n in range(1, len(examples[0])):
+        first_sent[0] = torch.cat((first_sent[0], pad_sequence([i[n][0] for i in examples], batch_first=True, padding_value=tokenizer.pad_token_id)))
+        first_sent[1].extend([i[n][2] for i in examples])
+        first_sent[2].extend([i[n][3] for i in examples])
+        first_sent[3].extend([i[n][4] for i in examples])
+        first_sent[4].extend([i[n][5] for i in examples])
+        first_sent[5].extend([i[n][6] for i in examples])
+        first_sent[6].extend([i[n][7] for i in examples])
+        first_sent[7] = torch.cat((first_sent[7], torch.tensor([i[n][8] for i in examples])))
+
+    return tuple(first_sent)
 
 def raw_data_link(dataset_name):
     if dataset_name == "wines":

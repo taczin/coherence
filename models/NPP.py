@@ -4,7 +4,8 @@ import torch
 from transformers import RobertaTokenizer, RobertaModel
 from data.datasets import (
     WikipediaTextDatasetParagraphsSentences,
-    WikipediaTextDatasetParagraphsSentencesTest
+    WikipediaTextDatasetParagraphsSentencesTest,
+    WikipediaTextDatasetParagraphOrder
 )
 from torch.utils.data.dataloader import DataLoader
 import math
@@ -12,13 +13,14 @@ from datetime import datetime
 import os
 from models.SDR_utils import MPerClassSamplerDeter
 from pytorch_metric_learning.samplers import MPerClassSampler
-from data.data_utils import reco_sentence_collate, reco_sentence_test_collate
+from data.data_utils import reco_sentence_collate, reco_sentence_test_collate, NPP_sentence_collate
 from functools import partial
 from pytorch_metric_learning import miners, losses, reducers
 from pytorch_metric_learning.distances import CosineSimilarity
 import pickle as pkl
 import faiss
 from models.eval_metrics import *
+from sentence_transformers import SentenceTransformer
 
 class NextParagraphPrediction(LightningModule):
     def __init__(self, hparams):
@@ -31,18 +33,33 @@ class NextParagraphPrediction(LightningModule):
         self.hparams.hparams_dir = path
         self.d_model = 768
         self.hparams.max_input_len = 512
-        self.model = RobertaModel.from_pretrained('roberta-base')
-        self.tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
+        #self.model = RobertaModel.from_pretrained('roberta-base')
+        # sentence embedding model
+        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        #self.tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
+        self.tokenizer = None
         #self.transformer = nn.Transformer(d_model=self.d_model, nhead=8, num_encoder_layers=6,
         #                               num_decoder_layers=0)
+        # need positional embeddings for sentences
+        self.pos_emb = PositionalEncoding(self.d_model, 512)
+        # need equivalent of token type embeddings on sentence level
+        self.sentence_type_emb = nn.Embedding(2, self.d_model)
+        # need entire BERT-like transformer model
         encoder_layer = nn.TransformerEncoderLayer(d_model=self.d_model, nhead=8)
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=2)
-        self.pos_emb = PositionalEncoding(self.d_model, 512)
+        # need MLM head for masked sentence prediction + loss function (cosine loss or metric learning loss)
+        self.mlm_loss_func = nn.CosineEmbeddingLoss(margin=0.2)
+        # need paragraph order head + loss function (binary cross-entropy loss)
+        self.po_cls = nn.Linear(self.d_model, 2)
+        self.po_loss_func = nn.BCEWithLogitsLoss()
+
+
         #self.classifier = nn.Linear(2*self.d_model, 1)
-        self.metric = CosineSimilarity()
-        pos_margin, neg_margin = 1, 0
-        self.loss_func = losses.ContrastiveLoss(pos_margin=pos_margin, neg_margin=neg_margin, distance=self.metric)
-        self.miner_func = miners.MultiSimilarityMiner()
+        #self.metric = CosineSimilarity()
+        #pos_margin, neg_margin = 1, 0
+        #self.loss_func = losses.ContrastiveLoss(pos_margin=pos_margin, neg_margin=neg_margin, distance=self.metric)
+        #self.loss_func = torch.nn.BCEWithLogitsLoss
+        #self.miner_func = miners.MultiSimilarityMiner()
         self.tracks = {}
 
     def forward(self, batch):
@@ -151,7 +168,7 @@ class NextParagraphPrediction(LightningModule):
 
 
 
-class SDRDataset(LightningDataModule):
+class NPPDataset(LightningDataModule):
     def __init__(self, hparams, tokenizer):
         super().__init__()
         self.tokenizer = tokenizer
@@ -170,7 +187,7 @@ class SDRDataset(LightningDataModule):
             num_workers=self.hparams.num_data_workers,
             sampler=sampler,
             batch_size=self.hparams.train_batch_size,
-            collate_fn=partial(reco_sentence_collate, tokenizer=self.tokenizer,),
+            collate_fn=partial(NPP_sentence_collate),
         )
         return loader
 
@@ -187,7 +204,7 @@ class SDRDataset(LightningDataModule):
             num_workers=self.hparams.num_data_workers,
             sampler=sampler,
             batch_size=self.hparams.val_batch_size,
-            collate_fn=partial(reco_sentence_collate, tokenizer=self.tokenizer,),
+            collate_fn=partial(NPP_sentence_collate),
             shuffle=False,
         )
         return loader
@@ -197,7 +214,7 @@ class SDRDataset(LightningDataModule):
             self.test_dataset,
             num_workers=self.hparams.num_data_workers,
             batch_size=self.hparams.test_batch_size,
-            collate_fn=partial(reco_sentence_test_collate, tokenizer=self.tokenizer,),
+            collate_fn=partial(NPP_sentence_collate),
             shuffle=False,
         )
         return loader
@@ -211,17 +228,18 @@ class SDRDataset(LightningDataModule):
             self.hparams.block_size
             if hasattr(self.hparams, "block_size")
             and self.hparams.block_size > 0
-            and self.hparams.block_size < self.tokenizer.max_len_single_sentence
-            else self.tokenizer.max_len_single_sentence
+            #and self.hparams.block_size < self.tokenizer.max_len_single_sentence
+            #else self.tokenizer.max_len_single_sentence
+            else 100
         )
-        self.train_dataset = WikipediaTextDatasetParagraphsSentences(
+        self.train_dataset = WikipediaTextDatasetParagraphOrder(
             tokenizer=self.tokenizer,
             hparams=self.hparams,
             dataset_name=self.dataset_name,
             block_size=block_size,
             mode="train",
         )
-        self.val_dataset = WikipediaTextDatasetParagraphsSentences(
+        self.val_dataset = WikipediaTextDatasetParagraphOrder(
             tokenizer=self.tokenizer,
             hparams=self.hparams,
             dataset_name=self.dataset_name,
@@ -231,7 +249,7 @@ class SDRDataset(LightningDataModule):
         #self.val_dataset.indices_map = self.val_dataset.indices_map[: self.hparams.limit_val_indices_batches]
         #self.val_dataset.labels = self.val_dataset.labels[: self.hparams.limit_val_indices_batches]
 
-        self.test_dataset = WikipediaTextDatasetParagraphsSentencesTest(
+        self.test_dataset = WikipediaTextDatasetParagraphOrder(
             tokenizer=self.tokenizer,
             hparams=self.hparams,
             dataset_name=self.dataset_name,

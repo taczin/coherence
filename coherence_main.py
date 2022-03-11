@@ -9,6 +9,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from utils.argparse_init import default_arg_parser, init_parse_argparse_default_params
 import logging
 from models.RTN import RTN, SDRDataset
+from models.NPP import NextParagraphPrediction, NPPDataset
 
 logging.basicConfig(level=logging.INFO)
 from pytorch_lightning.loggers import TensorBoardLogger
@@ -35,8 +36,9 @@ def main_train(hparams,parser):
     #    hparams = load_params_from_checkpoint(hparams, parser)
     hparams.max_input_len = 512
 
-    model = RTN(hparams)
-    sdr_dm = SDRDataset(hparams, model.tokenizer)
+    model = NextParagraphPrediction(hparams)
+    #sdr_dm = SDRDataset(hparams, model.tokenizer)
+    sdr_dm = NPPDataset(hparams, model.tokenizer)
 
     logger = TensorBoardLogger(save_dir=model.hparams.hparams_dir, name='', default_hp_metric=False)
     logger.log_hyperparams(model.hparams, metrics={model.hparams.metric_to_track: 0})
