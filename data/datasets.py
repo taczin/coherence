@@ -520,6 +520,7 @@ class WikipediaTextDatasetParagraphOrder(Dataset):
             print("\nSaving features into cached file %s", cached_features_file)
             with open(cached_features_file, "wb") as handle:
                 pickle.dump((self.examples, self.labels), handle, protocol=pickle.HIGHEST_PROTOCOL)
+            article2sections = {}
 
         #self.labels = [idx_article for idx_article, _, _ in self.indices_map]
 
