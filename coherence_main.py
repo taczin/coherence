@@ -40,7 +40,7 @@ def main_train(hparams,parser):
     #sdr_dm = SDRDataset(hparams, model.tokenizer)
     sdr_dm = NPPDataset(hparams, model.tokenizer)
 
-    logger = TensorBoardLogger(save_dir=model.hparams.hparams_dir, name='', default_hp_metric=False)
+    logger = TensorBoardLogger(save_dir=model.hparams.hparams_dir, name='test_logging', default_hp_metric=False)
     logger.log_hyperparams(model.hparams, metrics={model.hparams.metric_to_track: 0})
     print(f"\nLog directory:\n{model.hparams.hparams_dir}\n")
 

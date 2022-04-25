@@ -13,6 +13,8 @@ import csv
 import sys
 import random
 import pandas as pd
+import datasets
+from datasets import load_dataset
 #from models.reco.recos_utils import index_amp
 
 
@@ -450,6 +452,11 @@ class WikipediaTextDatasetParagraphOrder(Dataset):
         all_articles = self.save_load_splitted_dataset(mode, cached_features_file, raw_data_path)
 
         self.hparams = hparams
+        self.d_model = 100
+        self.cls_vector = torch.rand((1, self.d_model))
+        self.sep_vector = torch.rand((1, self.d_model))
+        self.mask_vector = torch.rand((1, self.d_model))
+        self.bernoulli = torch.distributions.bernoulli.Bernoulli(0.15)
 
         max_article_len,max_sentences, max_sent_len = int(1e6), 16, 10000
         block_size = min(block_size, tokenizer.max_len_sentences_pair) if tokenizer is not None else block_size
@@ -520,8 +527,8 @@ class WikipediaTextDatasetParagraphOrder(Dataset):
                         false_paragraph_pair = (article2sections[key][i+1], article2sections[key][i])
                         self.examples.append(true_paragraph_pair)
                         self.examples.append(false_paragraph_pair)
-                        self.labels.append(1)
                         self.labels.append(0)
+                        self.labels.append(1)
 
             print("\nSaving features into cached file %s", cached_features_file)
             article2sections = {}
@@ -569,22 +576,34 @@ class WikipediaTextDatasetParagraphOrder(Dataset):
         return raw_data_path
 
     def __len__(self):
-        return len(self.indices_map)
+        return len(self.examples)
 
     def __getitem__(self, item):
-        doc1 = [i[0][
+        doc1 = torch.stack([i[0][
                : self.hparams.max_input_len
-               ] if i[0]!= None else i[5] for i in self.examples[item][0][0]]
-        doc2 = [i[0][
+               ] if i[0]!= None else i[5] for i in self.examples[item][0][0]])
+        doc1 = torch.cat((self.cls_vector.to(doc1.device), doc1), 0)
+        doc2 = torch.stack([i[0][
                 : self.hparams.max_input_len
-                ] if i[0]!= None else i[5] for i in self.examples[item][1][0]]
-        #token_type_ids
-        doc_masks1 = [i[1][
-                     : self.hparams.max_input_len
-                     ] if i[0] != None else None for i in self.examples[item][0][0]]
-        doc_masks2 = [i[1][
-                     : self.hparams.max_input_len
-                     ] if i[0] != None else None for i in self.examples[item][1][0]]
+                ] if i[0]!= None else i[5] for i in self.examples[item][1][0]])
+        doc = torch.cat((doc1, self.sep_vector.to(doc1.device),
+                         doc2, self.sep_vector.to(doc1.device)), 0)
+        doc_mask = torch.ones(len(doc))
+        # decide with p=0.15 whether a sentence in the paragraph will be masked
+        probabilities = torch.ones_like(doc_mask).unsqueeze(-1) * 0.15
+        probabilities[[0, len(doc1)-1, len(doc)-1]] = 0
+        mlm_selection = torch.bernoulli(probabilities).to(doc.device).repeat((1, self.d_model))
+        masked_sentences = torch.where(mlm_selection != 0, self.mask_vector.to(doc1.device), doc)
+        # indices that arent masked because they are special vectors for cls and sep: 0 len(doc1), len(doc)
+
+        #if self.bernoulli.sample() == 1:
+
+        # add additional zero and one to each sentence's mask for SEP token
+        token_type_ids = torch.cat((torch.zeros((len(doc1)+1)), torch.ones((len(doc2)+1))), 0)
+        #doc_masks1 = torch.zeros(max_num_sentences)
+        #doc_masks1[:len(doc1)] = 1
+        #doc_masks2 = torch.zeros(max_num_sentences)
+        #doc_masks2[:len(doc2)] = 1
         sec_titles1 = self.examples[item][0][1]
         sec_titles2 = self.examples[item][1][1]
         len_sections1 = [i[2] for i in self.examples[item][0][0]]
@@ -593,12 +612,429 @@ class WikipediaTextDatasetParagraphOrder(Dataset):
         untokenized_text2 = [i[5] for i in self.examples[item][1][0]]
 
         return (
-            (doc1, doc2),
-            (doc_masks1, doc_masks2),
-            (self.examples[item][0][1], self.examples[item][1][1]),
+            masked_sentences,
+            doc,
+            doc_mask,
+            token_type_ids,
             (sec_titles1, sec_titles2),
             (len_sections1, len_sections2),
             item,
             self.labels[item],
             (untokenized_text1, untokenized_text2)
+        )
+
+
+class XLSumDatasetParagraphOrder(Dataset):
+    def __init__(self, tokenizer, hparams, dataset_name, block_size, mode="train"):
+        from sentence_transformers import SentenceTransformer
+        self.hparams = hparams
+        cached_features_file = os.path.join(
+            f"data/datasets/cached_proccessed/{dataset_name}",
+            f"paragraph_order_bs_{block_size}_{dataset_name}_{type(self).__name__}_mode_{mode}",
+        ).replace("\\","/")
+        self.cached_features_file = cached_features_file
+
+        os.makedirs(os.path.dirname(cached_features_file), exist_ok=True)
+
+        raw_data_path = self.download_raw(dataset_name)
+
+        all_articles = self.save_load_splitted_dataset(mode, cached_features_file, raw_data_path)
+        self.section_len = 10
+
+        self.hparams = hparams
+        self.d_model = 100
+        self.cls_vector = torch.rand((1, self.d_model))
+        self.sep_vector = torch.rand((1, self.d_model))
+        self.mask_vector = torch.rand((1, self.d_model))
+        self.bernoulli = torch.distributions.bernoulli.Bernoulli(0.15)
+
+        max_article_len,max_sentences, max_sent_len = int(1e6), 16, 10000
+        block_size = min(block_size, tokenizer.max_len_sentences_pair) if tokenizer is not None else block_size
+        self.block_size = block_size
+        self.tokenizer = SentenceTransformer('all-MiniLM-L6-v2')
+
+        if os.path.exists(cached_features_file) and (self.hparams is None or not self.hparams.overwrite_data_cache):
+            print("\nLoading features from cached file %s", cached_features_file)
+            if os.path.getsize(cached_features_file) > 0:
+                print("SIZE", os.path.getsize(cached_features_file))
+                with open(cached_features_file, "rb") as handle:
+                    self.examples, self.labels = pickle.load(handle)
+            else:
+                print('File is empty!')
+        else:
+            print("\nCreating features from dataset file at ", cached_features_file)
+
+            self.examples = []
+            self.indices_map = []
+            article2sections = {}
+            self.labels = []
+            valid_article_count = 0
+            skipped = 0
+            self.summaries = []
+
+            for idx_article, article in enumerate(tqdm(all_articles)):
+                if idx_article > 100:
+                    break
+                this_sample_sections = []
+                title = article['title']
+                text = article['text']
+                self.summaries.append(article['summary'])
+                sents = nltk.sent_tokenize(article['text'])
+                if len(sents) < self.section_len:
+                    #print('Article {} is too short'.format(title))
+                    skipped += 1
+                    continue
+
+                #title, sections = article[0], ast.literal_eval(article[1])
+                valid_sections_count = 0
+                num_sections = int(len(sents)/self.section_len)
+                # take 10 sentences at a time to create one paragraph since no \n is given
+                for section_idx in range(num_sections+1):
+                    # if we're not at the end of the text take a whole chunk of size self.section_len
+                    # otherwise take the last few sentences < self.section_len
+                    if section_idx < num_sections:
+                        section = sents[section_idx*self.section_len:section_idx*self.section_len+self.section_len]
+                    else:
+                        section = sents[section_idx*self.section_len:]
+                #for section_idx, section in enumerate(sections):
+                    this_sections_sentences = []
+                    if section == "":
+                        continue
+                    valid_sentences_count = 0
+                    title_with_base_title = "{}:{}".format(title, section_idx)
+                    sentences = section[:max_article_len]
+                    if len(sentences) == 0:
+                        continue
+                    embedded_sentences = self.tokenizer.encode(
+                            sentences, convert_to_tensor=True, show_progress_bar=False)
+                    for sent_idx, sent in enumerate(section[:max_article_len]):
+                        tokenized_desc = embedded_sentences[sent_idx][:block_size]
+                        len_tokenized = len(tokenized_desc) if tokenized_desc != None else 0
+                        this_sections_sentences.append(
+                            (
+                                tokenized_desc,
+                                len_tokenized,
+                                valid_article_count,
+                                valid_sections_count,
+                                valid_sentences_count,
+                                sent[:max_sent_len],
+                                idx_article
+                            ),
+                        )
+                        #self.indices_map.append((idx_article, valid_sections_count, valid_sentences_count))
+                        valid_sentences_count += 1
+                    this_sample_sections.append((this_sections_sentences, title_with_base_title))
+                    valid_sections_count += 1
+                #self.examples.append((this_sample_sections, title))
+                article2sections[title] = this_sample_sections
+                valid_article_count += 1
+            for key in article2sections:
+                num_sections = len(article2sections[key])
+                if num_sections > 1:
+                    for i in range(num_sections-1):
+                        true_paragraph_pair = (article2sections[key][i], article2sections[key][i+1])
+                        false_paragraph_pair = (article2sections[key][i+1], article2sections[key][i])
+                        self.examples.append(true_paragraph_pair)
+                        self.examples.append(false_paragraph_pair)
+                        self.labels.append(0)
+                        self.labels.append(1)
+
+            print("\nSaving features into cached file %s", cached_features_file)
+            article2sections = {}
+            print(mode)
+            print(len(self.examples), len(self.labels))
+            print("Skipped: ", skipped)
+            with open(cached_features_file, "wb") as handle:
+                pickle.dump((self.examples, self.labels), handle, protocol=pickle.HIGHEST_PROTOCOL)
+            print('Finished saving features.')
+
+        #self.labels = [idx_article for idx_article, _, _ in self.indices_map]
+
+    def save_load_splitted_dataset(self, mode, cached_features_file, raw_data_path):
+        proccessed_path = f"{cached_features_file}_EXAMPLES"
+        if not os.path.exists(proccessed_path):
+            split = "validation" if mode == "val" else mode
+            dataset = load_dataset("csebuetnlp/xlsum", "english", split=split)#, data_files=data_files)
+            all_articles = dataset
+            pickle.dump(all_articles, open(proccessed_path, "wb"))
+            print(f"\nsaved dataset at {proccessed_path}")
+        else:
+            all_articles = pickle.load(open(proccessed_path, "rb"))
+        setattr(self.hparams, f"{mode}_data_file", proccessed_path)
+        return all_articles
+
+    def read_all_articles(self, raw_data_path):
+        csv.field_size_limit(sys.maxsize if sys.maxsize < 2147483647 else 2147483647)
+        with open(raw_data_path, encoding='utf8', newline="") as f:
+            reader = csv.reader(f)
+            all_articles = list(reader)
+        return all_articles[1:]
+
+    def download_raw(self, dataset_name):
+        raw_data_path = f"data/datasets/{dataset_name}/raw_data"
+        os.makedirs(os.path.dirname(raw_data_path), exist_ok=True)
+        if not os.path.exists(raw_data_path):
+            os.system(f"wget -O {raw_data_path} {raw_data_link(dataset_name)}")
+        return raw_data_path
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, item):
+        doc1 = torch.stack([i[0][
+               : self.hparams.max_input_len
+               ] if i[0]!= None else i[5] for i in self.examples[item][0][0]])
+        doc1 = torch.cat((self.cls_vector.to(doc1.device), doc1), 0)
+        doc2 = torch.stack([i[0][
+                : self.hparams.max_input_len
+                ] if i[0]!= None else i[5] for i in self.examples[item][1][0]])
+        doc = torch.cat((doc1, self.sep_vector.to(doc1.device),
+                         doc2, self.sep_vector.to(doc1.device)), 0)
+        doc_mask = torch.ones(len(doc))
+        # decide with p=0.15 whether a sentence in the paragraph will be masked
+        probabilities = torch.ones_like(doc_mask).unsqueeze(-1) * 0.15
+        # set probabilities of special sentence vectors to be masked to zero
+        probabilities[[0, len(doc1)-1, len(doc)-1]] = 0
+        mlm_selection = torch.bernoulli(probabilities).to(doc.device).repeat((1, self.d_model))
+        masked_sentences = torch.where(mlm_selection != 0, self.mask_vector.to(doc1.device), doc)
+        # indices that arent masked because they are special vectors for cls and sep: 0 len(doc1), len(doc)
+
+        #if self.bernoulli.sample() == 1:
+
+        # add additional zero and one to each sentence's mask for SEP token
+        token_type_ids = torch.cat((torch.zeros((len(doc1)+1)), torch.ones((len(doc2)+1))), 0)
+        #doc_masks1 = torch.zeros(max_num_sentences)
+        #doc_masks1[:len(doc1)] = 1
+        #doc_masks2 = torch.zeros(max_num_sentences)
+        #doc_masks2[:len(doc2)] = 1
+        sec_titles1 = self.examples[item][0][1]
+        sec_titles2 = self.examples[item][1][1]
+        len_sections1 = [i[2] for i in self.examples[item][0][0]]
+        len_sections2 = [i[2] for i in self.examples[item][1][0]]
+        untokenized_text1 = [i[5] for i in self.examples[item][0][0]]
+        untokenized_text2 = [i[5] for i in self.examples[item][1][0]]
+
+        return (
+            masked_sentences,
+            doc,
+            doc_mask,
+            token_type_ids,
+            (sec_titles1, sec_titles2),
+            (len_sections1, len_sections2),
+            item,
+            self.labels[item],
+            (untokenized_text1, untokenized_text2)
+        )
+
+class XLSumDatasetParagraphOrderTest(Dataset):
+    def __init__(self, tokenizer, hparams, dataset_name, block_size, mode="train"):
+        from sentence_transformers import SentenceTransformer
+        self.hparams = hparams
+        cached_features_file = os.path.join(
+            f"data/datasets/cached_proccessed/{dataset_name}",
+            f"paragraph_order_bs_{block_size}_{dataset_name}_{type(self).__name__}_mode_{mode}",
+        ).replace("\\", "/")
+        self.cached_features_file = cached_features_file
+
+        os.makedirs(os.path.dirname(cached_features_file), exist_ok=True)
+
+        raw_data_path = self.download_raw(dataset_name)
+
+        all_articles = self.save_load_splitted_dataset(mode, cached_features_file, raw_data_path)
+        self.section_len = 10
+
+        self.hparams = hparams
+        self.d_model = 100
+        self.cls_vector = torch.rand((1, self.d_model))
+        self.sep_vector = torch.rand((1, self.d_model))
+        self.mask_vector = torch.rand((1, self.d_model))
+        self.bernoulli = torch.distributions.bernoulli.Bernoulli(0.15)
+
+
+        block_size = min(block_size, tokenizer.max_len_sentences_pair) if tokenizer is not None else block_size
+        self.block_size = block_size
+        self.tokenizer = SentenceTransformer('all-MiniLM-L6-v2')
+        self.ids2texts = {}
+        if os.path.exists(cached_features_file) and (self.hparams is None or not self.hparams.overwrite_data_cache):
+            print("\nLoading features from cached file %s", cached_features_file)
+            if os.path.getsize(cached_features_file) > 0:
+                print("SIZE", os.path.getsize(cached_features_file))
+                with open(cached_features_file, "rb") as handle:
+                    self.examples, self.labels = pickle.load(handle)
+            else:
+                print('File is empty!')
+        else:
+            self.ids2numbers = {}
+            self.examples = []
+            self.labels = []
+            examples1, labels1 = self.process_articles(all_articles)
+            examples2, labels2 = self.process_articles(all_articles, summaries=True)
+            self.examples.extend(examples1)
+            self.examples.extend(examples2)
+            self.labels.extend(labels1)
+            self.labels.extend(labels2)
+
+            with open(cached_features_file, "wb") as handle:
+                pickle.dump((self.examples, self.labels), handle, protocol=pickle.HIGHEST_PROTOCOL)
+            print('Finished saving features.')
+
+    def process_articles(self, all_articles, summaries=False):
+        max_article_len, max_sentences, max_sent_len = int(1e6), 16, 10000
+        cached_features_file = self.cached_features_file
+
+        print("\nCreating features from dataset file at ", cached_features_file)
+
+        examples = []
+        self.indices_map = []
+        article2sections = {}
+        labels = []
+        valid_article_count = 0
+        skipped = 0
+        #self.summaries = []
+
+        for idx_article, article in enumerate(tqdm(all_articles)):
+            if idx_article > 100:
+                break
+            this_sample_sections = []
+            title = article['title']
+            if summaries:
+                text = article['summary']
+            else:
+                text = article['text']
+            #self.summaries.append(article['summary'])
+            if not article['id'] in self.ids2numbers:
+                self.ids2numbers[article['id']] = idx_article
+            new_article_id = self.ids2numbers[article['id']]
+            sents = nltk.sent_tokenize(text)
+
+            # title, sections = article[0], ast.literal_eval(article[1])
+            valid_sections_count = 0
+            num_sections = int(len(sents) / self.section_len)
+            # take 10 sentences at a time to create one paragraph since no \n is given
+            for section_idx in range(num_sections + 1):
+                # if we're not at the end of the text take a whole chunk of size self.section_len
+                # otherwise take the last few sentences < self.section_len
+                if section_idx < num_sections:
+                    section = sents[
+                              section_idx * self.section_len:section_idx * self.section_len + self.section_len]
+                else:
+                    section = sents[section_idx * self.section_len:]
+                # for section_idx, section in enumerate(sections):
+                this_sections_sentences = []
+                if section == "":
+                    continue
+                valid_sentences_count = 0
+                if summaries:
+                    title_with_base_title = "{}:{}".format(title, "summary")
+                else:
+                    title_with_base_title = title
+                sentences = section[:max_article_len]
+                if len(sentences) == 0:
+                    continue
+                embedded_sentences = self.tokenizer.encode(
+                    sentences, convert_to_tensor=True, show_progress_bar=False)
+                for sent_idx, sent in enumerate(section[:max_article_len]):
+                    tokenized_desc = embedded_sentences[sent_idx][:self.block_size]
+                    len_tokenized = len(tokenized_desc) if tokenized_desc != None else 0
+                    this_sections_sentences.append(
+                        (
+                            tokenized_desc,
+                            len_tokenized,
+                            valid_article_count,
+                            valid_sections_count,
+                            valid_sentences_count,
+                            sent[:max_sent_len],
+                            idx_article,
+                            new_article_id
+                        ),
+                    )
+                    # self.indices_map.append((idx_article, valid_sections_count, valid_sentences_count))
+                    valid_sentences_count += 1
+                examples.append((this_sections_sentences, title_with_base_title))
+                labels.append(new_article_id)
+                valid_sections_count += 1
+            valid_article_count += 1
+
+        #print("\nSaving features into cached file %s", cached_features_file)
+        article2sections = {}
+        #print(mode)
+        print(len(examples), len(labels))
+        print("Skipped: ", skipped)
+        return examples, labels
+
+        # self.labels = [idx_article for idx_article, _, _ in self.indices_map]
+
+    def save_load_splitted_dataset(self, mode, cached_features_file, raw_data_path):
+        proccessed_path = f"{cached_features_file}_EXAMPLES"
+        if not os.path.exists(proccessed_path):
+            split = "validation" if mode == "val" else mode
+            dataset = load_dataset("csebuetnlp/xlsum", "english", split=split)  # , data_files=data_files)
+            all_articles = dataset
+            pickle.dump(all_articles, open(proccessed_path, "wb"))
+            print(f"\nsaved dataset at {proccessed_path}")
+        else:
+            all_articles = pickle.load(open(proccessed_path, "rb"))
+        setattr(self.hparams, f"{mode}_data_file", proccessed_path)
+        return all_articles
+
+    def read_all_articles(self, raw_data_path):
+        csv.field_size_limit(sys.maxsize if sys.maxsize < 2147483647 else 2147483647)
+        with open(raw_data_path, encoding='utf8', newline="") as f:
+            reader = csv.reader(f)
+            all_articles = list(reader)
+        return all_articles[1:]
+
+    def download_raw(self, dataset_name):
+        raw_data_path = f"data/datasets/{dataset_name}/raw_data"
+        os.makedirs(os.path.dirname(raw_data_path), exist_ok=True)
+        if not os.path.exists(raw_data_path):
+            os.system(f"wget -O {raw_data_path} {raw_data_link(dataset_name)}")
+        return raw_data_path
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, item):
+        doc1 = torch.stack([i[0][
+                            : self.hparams.max_input_len
+                            ] if i[0] != None else i[5] for i in self.examples[item][0]])
+        doc = torch.cat((self.cls_vector.to(doc1.device), doc1), 0)
+        #doc2 = torch.stack([i[0][
+        #                    : self.hparams.max_input_len
+        #                    ] if i[0] != None else i[5] for i in self.examples[item][1][0]])
+        #doc = torch.cat((doc1, self.sep_vector.to(doc1.device),
+        #                 doc2, self.sep_vector.to(doc1.device)), 0)
+        doc_mask = torch.ones(len(doc))
+        # decide with p=0.15 whether a sentence in the paragraph will be masked
+        # probabilities = torch.ones_like(doc_mask).unsqueeze(-1) * 0.15
+        # set probabilities of special sentence vectors to be masked to zero
+        #probabilities[[0, len(doc1) - 1, len(doc) - 1]] = 0
+        #mlm_selection = torch.bernoulli(probabilities).to(doc.device).repeat((1, self.d_model))
+        #masked_sentences = torch.where(mlm_selection != 0, self.mask_vector.to(doc1.device), doc)
+        # indices that arent masked because they are special vectors for cls and sep: 0 len(doc1), len(doc)
+
+        # if self.bernoulli.sample() == 1:
+
+        # add additional zero and one to each sentence's mask for SEP token
+        token_type_ids = torch.zeros(len(doc))
+        # doc_masks1 = torch.zeros(max_num_sentences)
+        # doc_masks1[:len(doc1)] = 1
+        # doc_masks2 = torch.zeros(max_num_sentences)
+        # doc_masks2[:len(doc2)] = 1
+        sec_titles = self.examples[item][1]
+        #sec_titles2 = self.examples[item][1][1]
+        len_sections = [i[2] for i in self.examples[item][0]]
+        #len_sections2 = [i[2] for i in self.examples[item][1][0]]
+        untokenized_text = [i[5] for i in self.examples[item][0]]
+        #untokenized_text2 = [i[5] for i in self.examples[item][1][0]]
+
+        return (
+            doc,
+            doc_mask,
+            token_type_ids,
+            sec_titles,
+            len_sections,
+            item,
+            self.labels[item],
+            untokenized_text,
         )
