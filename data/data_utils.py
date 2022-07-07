@@ -105,16 +105,16 @@ def coherence_sentence_test_collate(examples: List[torch.Tensor], tokenizer):
 def NPP_sentence_collate(examples: List[torch.Tensor]):
 
     padded_seq = pad_sequence([i[0] for i in examples], padding_value=0)
-    true_sentence_vectors = pad_sequence([i[1] for i in examples], padding_value=0)
-    seq_mask = pad_sequence([i[2] for i in examples], padding_value=0, batch_first=True)
-    padded_token_types = pad_sequence([i[3] for i in examples], padding_value=0)
+    #true_sentence_vectors = pad_sequence([i[2] for i in examples], padding_value=0)
+    seq_mask = pad_sequence([i[1] for i in examples], padding_value=0)#, batch_first=True)
+    padded_token_types = pad_sequence([i[2] for i in examples], padding_value=0)
     collated_examples = (
         padded_seq,
-        true_sentence_vectors,
+        #true_sentence_vectors,
         seq_mask,
         padded_token_types,
-        [i[8] for i in examples],
-        torch.tensor([i[7] for i in examples]),
+        [i[7] for i in examples],
+        torch.tensor([i[6] for i in examples]),
     )
     return collated_examples
 
@@ -136,6 +136,9 @@ def NPP_sentence_collate_test(examples: List[torch.Tensor]):
         [i[3] for i in examples],
     )
     return collated_examples
+
+def make_pairs(examples):
+    raise NotImplementedError()
 
 
 def raw_data_link(dataset_name):

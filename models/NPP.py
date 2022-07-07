@@ -23,7 +23,7 @@ import pickle as pkl
 import faiss
 from models.eval_metrics import *
 from utils import eval_metrics
-#from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer
 
 class NextParagraphPrediction(LightningModule):
     def __init__(self, hparams):
@@ -34,22 +34,30 @@ class NextParagraphPrediction(LightningModule):
         path = os.path.join(path, dt_string)
         os.makedirs(path, exist_ok=True)
         self.hparams.hparams_dir = path
-        self.d_model = 100
+        self.d_model = 384
         self.hparams.max_input_len = 512
+        self.d_hid = 2048
+        self.dropout = 0.1
+        self.nhead = 8
+        self.num_layers = 2
         #self.model = RobertaModel.from_pretrained('roberta-base')
         # sentence embedding model
         #self.model = SentenceTransformer('all-MiniLM-L6-v2')
         #self.tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
-        self.tokenizer = None
+        self.tokenizer = SentenceTransformer('all-MiniLM-L6-v2', device=self.device)
+        self.tokenizer.max_len_sentences_pair = 512
         #self.transformer = nn.Transformer(d_model=self.d_model, nhead=8, num_encoder_layers=6,
         #                               num_decoder_layers=0)
         # need positional embeddings for sentences
-        self.pos_emb = PositionalEncoding(self.d_model, 512)
+        self.pos_emb = PositionalEncoding(self.d_model, self.hparams.max_input_len)
         # need equivalent of token type embeddings on sentence level
         self.sentence_type_emb = nn.Embedding(2, self.d_model)
+        # need to normalize the summed embeddings before feeding to model
+        self.norm = nn.LayerNorm(self.d_model)
         # need entire BERT-like transformer model
-        encoder_layer = nn.TransformerEncoderLayer(d_model=self.d_model, nhead=4)
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=2)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=self.d_model, nhead=self.nhead, dim_feedforward=self.d_hid,
+                                                   dropout=self.dropout)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=self.num_layers)
         # need MLM head for masked sentence prediction + loss function (cosine loss or metric learning loss)
         self.mlm_loss_func = nn.MSELoss()
         # need paragraph order head + loss function (binary cross-entropy loss)
@@ -76,10 +84,11 @@ class NextParagraphPrediction(LightningModule):
         #pos_embeddings = self.pos_emb(torch.arange(batch[3].shape[1]).repeat((batch[3].shape[0], 1)))
         # adds positional embeddings to the input embeddings
         embeddings = self.pos_emb(batch[0])
-        sent_type_embeddings = self.sentence_type_emb(batch[3].int())
+        sent_type_embeddings = self.sentence_type_emb(batch[2].int())
         # the input embeddings are made up of the output of the sentence embedder, the sentence type embeddings and the
         # positional embeddings
         embeddings = embeddings+sent_type_embeddings
+        embeddings = self.norm(embeddings)
         #out = self.model(input_ids=batch[0], attention_mask=batch[1])
 
         out = self.transformer(embeddings, src_key_padding_mask=batch[2])
@@ -260,7 +269,7 @@ class NPPDataset(LightningDataModule):
     def val_dataloader(self):
         sampler = MPerClassSamplerDeter(
             self.val_dataset.labels,
-            self.hparams.val_batch_size/2,
+            2,
             length_before_new_iter=self.hparams.limit_val_indices_batches,
             batch_size=self.hparams.val_batch_size,
         )
@@ -296,7 +305,7 @@ class NPPDataset(LightningDataModule):
             and self.hparams.block_size > 0
             #and self.hparams.block_size < self.tokenizer.max_len_single_sentence
             #else self.tokenizer.max_len_single_sentence
-            else 100
+            else 512
         )
         if self.dataset_name == "video_games":
             self.train_dataset = WikipediaTextDatasetParagraphOrder(
@@ -316,7 +325,7 @@ class NPPDataset(LightningDataModule):
             #self.val_dataset.indices_map = self.val_dataset.indices_map[: self.hparams.limit_val_indices_batches]
             #self.val_dataset.labels = self.val_dataset.labels[: self.hparams.limit_val_indices_batches]
 
-            self.test_dataset = WikipediaTextDatasetParagraphOrder(
+            self.test_dataset = XLSumDatasetParagraphOrder(
                 tokenizer=self.tokenizer,
                 hparams=self.hparams,
                 dataset_name=self.dataset_name,
@@ -331,7 +340,7 @@ class NPPDataset(LightningDataModule):
                 block_size=block_size,
                 mode="train",
             )
-            self.val_dataset = XLSumDatasetParagraphOrder(
+            self.val_dataset = XLSumDatasetParagraphOrderTest(
                 tokenizer=self.tokenizer,
                 hparams=self.hparams,
                 dataset_name=self.dataset_name,

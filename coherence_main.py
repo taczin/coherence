@@ -2,7 +2,7 @@
 import os
 #from utils.pytorch_lightning_utils.pytorch_lightning_utils import load_params_from_checkpoint
 import torch
-from pytorch_lightning.profiler.profilers import SimpleProfiler
+from pytorch_lightning.profiler import SimpleProfiler
 import pytorch_lightning
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -60,7 +60,7 @@ def main_train(hparams,parser):
         # ),
         logger=logger,
         max_epochs=hparams.max_epochs,
-        gpus=hparams.gpus,
+        gpus=False,#hparams.gpus,
         #strategy="ddp",
         limit_val_batches=hparams.limit_val_batches,
         limit_train_batches=hparams.limit_train_batches,
@@ -68,7 +68,7 @@ def main_train(hparams,parser):
         check_val_every_n_epoch=hparams.check_val_every_n_epoch,
         profiler=SimpleProfiler(),
         accumulate_grad_batches=hparams.accumulate_grad_batches,
-        reload_dataloaders_every_epoch=True,
+        reload_dataloaders_every_n_epochs=1,
         resume_from_checkpoint=hparams.resume_from_checkpoint
     )
     if(not hparams.test_only):
