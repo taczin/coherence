@@ -2,13 +2,7 @@ from pytorch_lightning.core import LightningModule, LightningDataModule
 import torch.nn as nn
 import torch
 from transformers import RobertaTokenizer, RobertaModel
-from data.datasets import (
-    WikipediaTextDatasetParagraphsSentences,
-    WikipediaTextDatasetParagraphsSentencesTest,
-    WikipediaTextDatasetParagraphOrder,
-    XLSumDatasetParagraphOrder,
-    XLSumDatasetParagraphOrderTest
-)
+from data.datasets import *
 from torch.utils.data.dataloader import DataLoader
 import math
 from datetime import datetime
@@ -91,7 +85,7 @@ class NextParagraphPrediction(LightningModule):
         embeddings = self.norm(embeddings)
         #out = self.model(input_ids=batch[0], attention_mask=batch[1])
 
-        out = self.transformer(embeddings, src_key_padding_mask=batch[2])
+        out = self.transformer(embeddings, src_key_padding_mask=batch[3])
         # retrieve masked vector
         mlm_loss = self.mlm_loss_func(out, batch[1])
         # alternatively take cls vector output instead of mean
@@ -269,7 +263,7 @@ class NPPDataset(LightningDataModule):
     def val_dataloader(self):
         sampler = MPerClassSamplerDeter(
             self.val_dataset.labels,
-            2,
+            self.hparams.val_batch_size/2,
             length_before_new_iter=self.hparams.limit_val_indices_batches,
             batch_size=self.hparams.val_batch_size,
         )
@@ -325,7 +319,7 @@ class NPPDataset(LightningDataModule):
             #self.val_dataset.indices_map = self.val_dataset.indices_map[: self.hparams.limit_val_indices_batches]
             #self.val_dataset.labels = self.val_dataset.labels[: self.hparams.limit_val_indices_batches]
 
-            self.test_dataset = XLSumDatasetParagraphOrder(
+            self.test_dataset = WikipediaTextDatasetParagraphOrder(
                 tokenizer=self.tokenizer,
                 hparams=self.hparams,
                 dataset_name=self.dataset_name,
@@ -333,14 +327,14 @@ class NPPDataset(LightningDataModule):
                 mode="test",
             )
         elif self.dataset_name == "xlsum":
-            self.train_dataset = XLSumDatasetParagraphOrder(
+            self.train_dataset = XLSumDatasetParagraphOrderPairsTest(
                 tokenizer=self.tokenizer,
                 hparams=self.hparams,
                 dataset_name=self.dataset_name,
                 block_size=block_size,
                 mode="train",
             )
-            self.val_dataset = XLSumDatasetParagraphOrderTest(
+            self.val_dataset = XLSumDatasetParagraphOrderPairsTest(
                 tokenizer=self.tokenizer,
                 hparams=self.hparams,
                 dataset_name=self.dataset_name,
@@ -350,7 +344,7 @@ class NPPDataset(LightningDataModule):
             # self.val_dataset.indices_map = self.val_dataset.indices_map[: self.hparams.limit_val_indices_batches]
             # self.val_dataset.labels = self.val_dataset.labels[: self.hparams.limit_val_indices_batches]
 
-            self.test_dataset = XLSumDatasetParagraphOrderTest(
+            self.test_dataset = XLSumDatasetParagraphOrderPairsTest(
                 tokenizer=self.tokenizer,
                 hparams=self.hparams,
                 dataset_name=self.dataset_name,

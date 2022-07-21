@@ -453,7 +453,7 @@ class WikipediaTextDatasetParagraphOrder(Dataset):
         all_articles = self.save_load_splitted_dataset(mode, cached_features_file, raw_data_path)
 
         self.hparams = hparams
-        self.d_model = 100
+        self.d_model = 384
         self.cls_vector = torch.rand((1, self.d_model))
         self.sep_vector = torch.rand((1, self.d_model))
         self.mask_vector = torch.rand((1, self.d_model))
@@ -462,7 +462,7 @@ class WikipediaTextDatasetParagraphOrder(Dataset):
         max_article_len,max_sentences, max_sent_len = int(1e6), 16, 10000
         block_size = min(block_size, tokenizer.max_len_sentences_pair) if tokenizer is not None else block_size
         self.block_size = block_size
-        self.tokenizer = SentenceTransformer('all-MiniLM-L6-v2')
+        self.tokenizer = tokenizer
 
         if os.path.exists(cached_features_file) and (self.hparams is None or not self.hparams.overwrite_data_cache):
             print("\nLoading features from cached file %s", cached_features_file)
@@ -1071,14 +1071,13 @@ class XLSumDatasetParagraphOrderPairsTest(Dataset):
         raw_data_path = self.download_raw(dataset_name)
 
         all_articles = self.save_load_splitted_dataset(mode, cached_features_file, raw_data_path)
-        self.section_len = 10
+        self.section_len = 10 #TODO find right value
 
-        self.hparams = hparams
         self.d_model = 384
         self.cls_vector = torch.rand((1, self.d_model))
         self.sep_vector = torch.rand((1, self.d_model))
         self.mask_vector = torch.rand((1, self.d_model))
-        self.bernoulli = torch.distributions.bernoulli.Bernoulli(0.15)
+        #self.bernoulli = torch.distributions.bernoulli.Bernoulli(0.15)
 
 
         block_size = min(block_size, tokenizer.max_seq_length) if tokenizer is not None else block_size
@@ -1109,48 +1108,72 @@ class XLSumDatasetParagraphOrderPairsTest(Dataset):
             print('Finished saving features.')
 
     def process_articles(self, all_articles, summaries=False):
-        max_article_len, max_sentences, max_sent_len = int(1e6), 16, 10000
+        max_article_len, max_sentences, max_sent_len = int(1e4), 16, 100
         cached_features_file = self.cached_features_file
 
         print("\nCreating features from dataset file at ", cached_features_file)
 
-        self.examples = []
+        examples = []
         self.indices_map = []
         article2sections = {}
-        self.labels = []
+        labels = []
+        valid_article_count = 0
+        article_stats = {'min': 1000, 'max': 0}
+        len_sections = []
 
         for idx_article, article in enumerate(tqdm(all_articles)):
-            if idx_article > 100:
-                break
             this_sample_sections = []
-            title, sections = article[0], ast.literal_eval(article[1])
+            title = article['title']
+            if summaries:
+                text = article['summary']
+            else:
+                text = article['text']
+            sents = nltk.sent_tokenize(text)
             valid_sections_count = 0
-            num_sections = len(sections)
-            if num_sections == 1:
-                print('Article {} has only one section.'.format(title))
-                continue
-            for section_idx, section in enumerate(sections):
+            num_sections = int(len(sents) / self.section_len)
+            if num_sections > article_stats['max']:
+                article_stats['max'] = num_sections
+            if num_sections < article_stats['min']:
+                article_stats['min'] = num_sections
+            len_sections.append(num_sections)
+            # take 10 sentences at a time to create one paragraph since no \n is given
+            for section_idx in range(num_sections + 1):
+                # if we're not at the end of the text take a whole chunk of size self.section_len
+                # otherwise take the last few sentences < self.section_len
+                if section_idx < num_sections:
+                    section = sents[
+                              section_idx * self.section_len:section_idx * self.section_len + self.section_len]
+                else:
+                    section = sents[section_idx * self.section_len:]
+                # for section_idx, section in enumerate(sections):
                 this_sections_sentences = []
-                if section[1] == "":
+                if section == "":
                     continue
                 valid_sentences_count = 0
-                title_with_base_title = "{}:{}".format(title, section[0])
-                sentences = nltk.sent_tokenize(section[1][:max_article_len])
+                if summaries:
+                    title_with_base_title = "{}:{}".format(title, "summary")
+                else:
+                    title_with_base_title = title
+                sentences = section[:max_article_len]
                 if len(sentences) == 0:
                     continue
-                embedded_sentences = self.tokenizer.encode(
-                    sentences, convert_to_tensor=True, show_progress_bar=False)
-                for sent_idx, sent in enumerate(nltk.sent_tokenize(section[1][:max_article_len])[:max_sentences]):
-                    tokenized_desc = embedded_sentences[sent_idx][:block_size]
+                try:
+                    embedded_sentences = self.tokenizer.encode(
+                        sentences, convert_to_tensor=True, show_progress_bar=False)
+                except Exception:
+                    print('cuda problem here')
+                for sent_idx, sent in enumerate(section[:max_article_len]):
+                    tokenized_desc = embedded_sentences[sent_idx]
                     len_tokenized = len(tokenized_desc) if tokenized_desc != None else 0
                     this_sections_sentences.append(
                         (
                             tokenized_desc,
                             len_tokenized,
-                            idx_article,
+                            valid_article_count,
                             valid_sections_count,
                             valid_sentences_count,
                             sent[:max_sent_len],
+                            idx_article,
                         ),
                     )
                     # self.indices_map.append((idx_article, valid_sections_count, valid_sentences_count))
@@ -1158,6 +1181,7 @@ class XLSumDatasetParagraphOrderPairsTest(Dataset):
                 this_sample_sections.append((this_sections_sentences, title_with_base_title))
                 valid_sections_count += 1
             # self.examples.append((this_sample_sections, title))
+            valid_article_count += 1
             article2sections[title] = this_sample_sections
         for key in article2sections:
             num_sections = len(article2sections[key])
@@ -1165,10 +1189,13 @@ class XLSumDatasetParagraphOrderPairsTest(Dataset):
                 for i in range(num_sections - 1):
                     true_paragraph_pair = (article2sections[key][i], article2sections[key][i + 1])
                     false_paragraph_pair = (article2sections[key][i + 1], article2sections[key][i])
-                    self.examples.append(true_paragraph_pair)
-                    self.examples.append(false_paragraph_pair)
-                    self.labels.append(0)
-                    self.labels.append(1)
+                    examples.append(true_paragraph_pair)
+                    examples.append(false_paragraph_pair)
+                    labels.append(0)
+                    labels.append(1)
+        article_stats['avg'] = len_sections.mean()
+        print(article_stats)
+        return examples, labels
 
         # self.labels = [idx_article for idx_article, _, _ in self.indices_map]
 
@@ -1214,6 +1241,7 @@ class XLSumDatasetParagraphOrderPairsTest(Dataset):
         doc2 = torch.stack([i[0][
                             : self.hparams.max_input_len
                             ] if i[0] != None else i[5] for i in self.examples[item][1][0]])
+
         doc = torch.cat((doc1, self.sep_vector.to(doc1.device),
                          doc2, self.sep_vector.to(doc1.device)), 0)
         doc_mask = torch.ones(len(doc))

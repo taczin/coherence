@@ -105,19 +105,32 @@ def coherence_sentence_test_collate(examples: List[torch.Tensor], tokenizer):
 def NPP_sentence_collate(examples: List[torch.Tensor]):
 
     padded_seq = pad_sequence([i[0] for i in examples], padding_value=0)
-    #true_sentence_vectors = pad_sequence([i[2] for i in examples], padding_value=0)
-    seq_mask = pad_sequence([i[1] for i in examples], padding_value=0)#, batch_first=True)
-    padded_token_types = pad_sequence([i[2] for i in examples], padding_value=0)
+    true_sentence_vectors = pad_sequence([i[1] for i in examples], padding_value=0)
+    seq_mask = pad_sequence([i[2] for i in examples], padding_value=0)
+    padded_token_types = pad_sequence([i[3] for i in examples], padding_value=0, batch_first=True)
     collated_examples = (
         padded_seq,
-        #true_sentence_vectors,
+        true_sentence_vectors,
         seq_mask,
         padded_token_types,
-        [i[7] for i in examples],
-        torch.tensor([i[6] for i in examples]),
+        [i[8] for i in examples],
+        torch.tensor([i[7] for i in examples]),
     )
     return collated_examples
 
+""" get_item()
+(
+            masked_sentences,
+            doc,
+            doc_mask,
+            token_type_ids,
+            (sec_titles1, sec_titles2),
+            (len_sections1, len_sections2),
+            item,
+            self.labels[item],
+            (untokenized_text1, untokenized_text2)
+        )
+"""
 
 def NPP_sentence_collate_test(examples: List[torch.Tensor]):
 
