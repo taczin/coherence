@@ -10,6 +10,8 @@ from utils.argparse_init import default_arg_parser, init_parse_argparse_default_
 import logging
 from models.RTN import RTN, SDRDataset
 from models.NPP import NextParagraphPrediction, NPPDataset
+from sentence_transformers import SentenceTransformer
+
 
 logging.basicConfig(level=logging.INFO)
 from pytorch_lightning.loggers import TensorBoardLogger
@@ -28,17 +30,18 @@ def main():
     main_train(hyperparams,parser)
 
 
-def main_train(hparams,parser):
+def main_train(hparams, parser):
     """Initialize the model, call training loop."""
     pytorch_lightning.utilities.seed.seed_everything(seed=hparams.seed)
 
     #if(hparams.resume_from_checkpoint not in [None,'']):
     #    hparams = load_params_from_checkpoint(hparams, parser)
     hparams.max_input_len = 512
-
+    tokenizer = SentenceTransformer('all-MiniLM-L6-v2')
+    tokenizer.max_len_sentences_pair = 512
     model = NextParagraphPrediction(hparams)
     #sdr_dm = SDRDataset(hparams, model.tokenizer)
-    sdr_dm = NPPDataset(hparams, model.tokenizer)
+    sdr_dm = NPPDataset(hparams, tokenizer)
 
     logger = TensorBoardLogger(save_dir=model.hparams.hparams_dir, name='test_logging', default_hp_metric=False)
     logger.log_hyperparams(model.hparams, metrics={model.hparams.metric_to_track: 0})
@@ -60,7 +63,8 @@ def main_train(hparams,parser):
         # ),
         logger=logger,
         max_epochs=hparams.max_epochs,
-        gpus=False,#hparams.gpus,
+        accelerator='gpu',
+        devices=[0],
         #strategy="ddp",
         limit_val_batches=hparams.limit_val_batches,
         limit_train_batches=hparams.limit_train_batches,

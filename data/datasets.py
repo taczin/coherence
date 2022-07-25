@@ -463,7 +463,7 @@ class WikipediaTextDatasetParagraphOrder(Dataset):
         block_size = min(block_size, tokenizer.max_len_sentences_pair) if tokenizer is not None else block_size
         self.block_size = block_size
         self.tokenizer = tokenizer
-
+        print(self.tokenizer.device)
         if os.path.exists(cached_features_file) and (self.hparams is None or not self.hparams.overwrite_data_cache):
             print("\nLoading features from cached file %s", cached_features_file)
             if os.path.getsize(cached_features_file) > 0:
@@ -481,8 +481,8 @@ class WikipediaTextDatasetParagraphOrder(Dataset):
             self.labels = []
 
             for idx_article, article in enumerate(tqdm(all_articles)):
-                if idx_article > 100:
-                    break
+                #if idx_article > 100:
+                #    break
                 this_sample_sections = []
                 title, sections = article[0], ast.literal_eval(article[1])
                 valid_sections_count = 0
@@ -501,8 +501,8 @@ class WikipediaTextDatasetParagraphOrder(Dataset):
                         continue
                     embedded_sentences = self.tokenizer.encode(
                             sentences, convert_to_tensor=True, show_progress_bar=False)
-                    for sent_idx, sent in enumerate(nltk.sent_tokenize(section[1][:max_article_len])[:max_sentences]):
-                        tokenized_desc = embedded_sentences[sent_idx][:block_size]
+                    for sent_idx, sent in enumerate(embedded_sentences):
+                        tokenized_desc = embedded_sentences[sent_idx]
                         len_tokenized = len(tokenized_desc) if tokenized_desc != None else 0
                         this_sections_sentences.append(
                             (
@@ -511,7 +511,7 @@ class WikipediaTextDatasetParagraphOrder(Dataset):
                                 idx_article,
                                 valid_sections_count,
                                 valid_sentences_count,
-                                sent[:max_sent_len],
+                                sentences[sent_idx],
                             ),
                         )
                         #self.indices_map.append((idx_article, valid_sections_count, valid_sentences_count))

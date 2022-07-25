@@ -17,7 +17,6 @@ import pickle as pkl
 import faiss
 from models.eval_metrics import *
 from utils import eval_metrics
-from sentence_transformers import SentenceTransformer
 
 class NextParagraphPrediction(LightningModule):
     def __init__(self, hparams):
@@ -38,8 +37,8 @@ class NextParagraphPrediction(LightningModule):
         # sentence embedding model
         #self.model = SentenceTransformer('all-MiniLM-L6-v2')
         #self.tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
-        self.tokenizer = SentenceTransformer('all-MiniLM-L6-v2', device=self.device)
-        self.tokenizer.max_len_sentences_pair = 512
+        #self.tokenizer = torch.nn.ModuleList(SentenceTransformer('all-MiniLM-L6-v2'))
+        #self.tokenizer.max_len_sentences_pair = 512
         #self.transformer = nn.Transformer(d_model=self.d_model, nhead=8, num_encoder_layers=6,
         #                               num_decoder_layers=0)
         # need positional embeddings for sentences
@@ -293,6 +292,8 @@ class NPPDataset(LightningDataModule):
 
     def setup(self, stage):
         self.dataset_name = self.hparams.dataset_name
+        if self.trainer.num_devices:
+            self.tokenizer.to('cuda')
         block_size = (
             self.hparams.block_size
             if hasattr(self.hparams, "block_size")
@@ -384,7 +385,10 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', pe, persistent=False)
 
     def forward(self, x):
-        x = x + self.pe[:x.size(0), :]
+        try:
+            x = x + self.pe[:x.size(0), :]
+        except Exception:
+            print('here')
         return x
 
 class ContrastiveTransformations(object):
